@@ -5,8 +5,8 @@ import sys
 import psutil
 import math
 
-p = psutil.Process(os.getpid())
-p.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+# p = psutil.Process(os.getpid())
+# p.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
 
 
 def get_arg(index):
@@ -18,7 +18,11 @@ def get_arg(index):
         return sys.argv[index]
 
 
-def ptype(len): # Converts length of a pulse to binary 0/1 or a 'R' for a reference/position frame
+def ptype(len):
+    # Converts length of a pulse to binary 0/1 or a 'R' for a reference/position frame
+    # ~8ms is an R frame
+    # ~5ms is a 1
+    # ~3ms is a 0
     if len >= 9:
         return 'R'
     elif len <= 4 and len > 1:
@@ -77,19 +81,7 @@ tHours = 0
 tDays = 0
 tYears = 0
 
-blocksize = 8  # 8 = 1ms
-overlap = 0
-
-# filename = 'irig_frame_sample.wav'
-# filename = 'irig_multiframe_sample.wav'
-# filename = 'irig_sample_10m.wav'
-# filename = 'E:/Apollo_11_Data_Delivery/concatenated_wav_files/T870/defluttered_linear_A11_T870_HR2L_CH31.wav'
-# filename = 'E:/Apollo_11_Data_Delivery/concatenated_wav_files/T869/A11_T869_HR1U_CH1.wav'
-# filename = 'E:/Apollo_11_Data_Delivery/concatenated_wav_files/T869/defluttered_linear_A11_T869_HR1U_CH1.wav'
-
-# datafile_path = "E:/Apollo_11_Data_Delivery/concatenated_wav_files/"
-datafile_path = "D:/"
-
+# arguments to select tape directory, tweak RMS threshold for bit detection, and skip x first seconds if the first decoded frame is malformed
 tape = get_arg(1)
 drive = get_arg(2)
 if get_arg(3) == '':
@@ -122,6 +114,7 @@ outputFile = open(output_file_name_and_path, "w")
 outputFile.write('file_seconds|file_seconds_diff|IRIG_time|IRIG_in_seconds|irig_seconds_diff|file_to_irig_seconds_diff|GET\n')
 outputFile.close()
 
+# make a file in adobe marker format for import into Premiere or Audition. Will place markers containing decoded GET locations
 marker_output_file_name_and_path = datafile_path + tape + '/' + channel1_filename[:-8] + "_adobe_markers.csv"
 markerFile = open(marker_output_file_name_and_path, "w")
 markerFile.write('Name\tStart\tDuration Time\tFormat\tType\tDescription\n')
@@ -138,22 +131,29 @@ decoded_time_count = 0
 first_seconds_decoded = 0
 first_seconds_file = 0
 
+blocksize = 8  # 8 = 1ms
+overlap = 0
+
+# loop through sound file 1ms at a time
 for block in sf.blocks(filename, blocksize=blocksize, overlap=overlap):
     block_count += 1
     rms = np.sqrt(np.mean(block**2))
     # print(rms)
     if rms > rms_threshold:
-        signal_ms_duration += 1
+        signal_ms_duration += 1 # count duration that this signal lasts 1ms at a time
     elif signal_ms_duration > 1: #  signal has dropped down - figure out what kind it is and add the appropriate bit
         bit = ptype(signal_ms_duration)
-
         if bit == "R":
-            if last_bit == "R":  # double R - start new frame
+            if last_bit == "R":  # double R - IRIG frame start found
                 if len(frame_segments) == 10:  # If previous frame is not malformed, decode it
-                    if decoded_time_count % 10 == 0 and frame_start_time_secs > skip_first_seconds:  # Only analyze and print every x successfully decoded frame if seconds to skip parameter provided, only start after that parameter
+                    if decoded_time_count % 10 == 0 and frame_start_time_secs > skip_first_seconds:
+                        # Only analyze and print every x successfully decoded frame if seconds to skip parameter provided, only start after that parameter
                         outputFile = open(output_file_name_and_path, "a")
                         markerFile = open(marker_output_file_name_and_path, "a")
 
+                        # decode the 8 different portions of the IRIG frame
+                        # see this reference for IRIG format:
+                        # https://ferrara.space/content/images/2017/02/IRIG-B-1.png
                         tSeconds = get_int_by_binary(frame_segments[0])
                         tMinutes = get_int_by_binary(frame_segments[1])
                         tHours = get_int_by_binary(frame_segments[2])
@@ -162,10 +162,13 @@ for block in sf.blocks(filename, blocksize=blocksize, overlap=overlap):
                         try:
                             tDays = tDays + int(frame_segments[4][0]) * pVal[10] + int(frame_segments[4][1]) * pVal[11]
                         except Exception as e:
+                            # bad. I really don't care if this tDays increment works. It's more important that nothing crashes
                             pass
                         tYears = get_int_by_binary(frame_segments[5])
                         ctrl_funcs = frame_segments[6] + frame_segments[7] #  unused part of IRIG spec
                         binary_tod = frame_segments[8] + frame_segments[9]
+
+                        # derive time variables from IRIG data. Compare decoded time with actual wav file time to measure wav speed drift
                         irig_in_seconds = tDays * 24 * 60 * 60 + tHours * 60 * 60 + tMinutes * 60 + tSeconds
                         if first_seconds_decoded == 0:
                             first_seconds_decoded = irig_in_seconds
@@ -186,7 +189,8 @@ for block in sf.blocks(filename, blocksize=blocksize, overlap=overlap):
                         markerLine = '{0}\t{1}\t{2}\t{3}\t{4}\t{5}\n'.format(GET_by_UTC(irig_time), HMS_by_seconds(frame_start_time_secs), "0:00:00", "decimal", "Cue", "GET error (seconds): " + str(file_to_irig_seconds_diff))
 
                         print(output_string)
-                        # Only write line if the UTC is likely to be correct (time diff between IRIG and file time not too much). Only works with defluttered files
+                        # Only write line if the UTC is likely to be correct (time diff between IRIG and file time not too much).
+                        # Only works with defluttered NASA 30-track files. Otherwise the drift can be 1000s of seconds.
                         if file_to_irig_seconds_diff < 10 and file_to_irig_seconds_diff > -10:
                             outputFile.write(outputLine)
                             outputFile.close()
@@ -211,7 +215,7 @@ for block in sf.blocks(filename, blocksize=blocksize, overlap=overlap):
 
         last_bit = bit
 
-        # #print frame bits
+        # print raw frame bits - uncomment this to see the ugly details. Helps in determining best RMS threshold parameter
         # if bit == "R":
         #     print(bit + '-' + str(len(frame_segments)))
         # elif bit != '':
@@ -222,4 +226,3 @@ for block in sf.blocks(filename, blocksize=blocksize, overlap=overlap):
 
     # if block_count >= 100000:
     #     break
-
