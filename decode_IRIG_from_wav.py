@@ -2,7 +2,7 @@ import numpy as np
 import soundfile as sf
 import os
 import sys
-import psutil
+# import psutil
 import math
 
 # p = psutil.Process(os.getpid())
@@ -46,7 +46,7 @@ def get_int_by_binary(bits): # Sums up bits stored within the bits queue
     return csum
 
 def GET_by_UTC(irig_time):
-    apollo11_launch_time = "197:13:32:00"
+    apollo11_launch_time = "197:13:32:01"
     launch_seconds = seconds_by_UTC(apollo11_launch_time)
     irig_seconds = seconds_by_UTC(irig_time)
     seconds_since_launch = irig_seconds - launch_seconds
@@ -83,7 +83,12 @@ tYears = 0
 
 # arguments to select tape directory, tweak RMS threshold for bit detection, and skip x first seconds if the first decoded frame is malformed
 tape = get_arg(1)
-drive = get_arg(2)
+
+if get_arg(2) == 'E':
+    datafile_path = 'E:/Apollo_11_Data_Delivery/concatenated_wav_files/defluttered/'
+else:
+    datafile_path = 'F:/'
+
 if get_arg(3) == '':
     rms_threshold = 0.20
 else:
@@ -94,10 +99,15 @@ if get_arg(4) == '':
 else:
     skip_first_seconds = int(get_arg(4))
 
-if drive == 'D':
-    datafile_path = 'D:/'
+if get_arg(5) == '':
+    bitrate = 8
 else:
-    datafile_path = 'E:/Apollo_11_Data_Delivery/concatenated_wav_files/'
+    bitrate = float(get_arg(5))
+
+if get_arg(6) == '':
+    record_every_nth = 10
+else:
+    record_every_nth = int(get_arg(6))
 
 locdirlisting = os.listdir(datafile_path + '/' + tape)
 
@@ -131,7 +141,7 @@ decoded_time_count = 0
 first_seconds_decoded = 0
 first_seconds_file = 0
 
-blocksize = 8  # 8 = 1ms
+blocksize = bitrate  # 8 = 1ms for 8khz soundfile
 overlap = 0
 
 # loop through sound file 1ms at a time
@@ -146,7 +156,7 @@ for block in sf.blocks(filename, blocksize=blocksize, overlap=overlap):
         if bit == "R":
             if last_bit == "R":  # double R - IRIG frame start found
                 if len(frame_segments) == 10:  # If previous frame is not malformed, decode it
-                    if decoded_time_count % 10 == 0 and frame_start_time_secs > skip_first_seconds:
+                    if frame_start_time_secs > skip_first_seconds:
                         # Only analyze and print every x successfully decoded frame if seconds to skip parameter provided, only start after that parameter
                         outputFile = open(output_file_name_and_path, "a")
                         markerFile = open(marker_output_file_name_and_path, "a")
@@ -194,8 +204,10 @@ for block in sf.blocks(filename, blocksize=blocksize, overlap=overlap):
                         if file_to_irig_seconds_diff < 10 and file_to_irig_seconds_diff > -10:
                             outputFile.write(outputLine)
                             outputFile.close()
-                            markerFile.write(markerLine)
-                            markerFile.close()
+                            if decoded_time_count % record_every_nth == 0:
+                                markerFile.write(markerLine)
+                                markerFile.close()
+                                print("marker record written")
 
                     decoded_time_count += 1
                 # else:

@@ -4,6 +4,8 @@ import math
 import wave
 import contextlib
 
+# this script uses the decoded IRIG csvs and the CH1 wav files to establish GET start and stop of each tape
+
 def secondsToGET(input_seconds):
     hours = abs(int(input_seconds / 3600))
     minutes = abs(int(input_seconds / 60)) % 60 % 60
