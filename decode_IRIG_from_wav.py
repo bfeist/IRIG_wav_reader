@@ -102,7 +102,7 @@ else:
 if get_arg(5) == '':
     bitrate = 8
 else:
-    bitrate = float(get_arg(5))
+    bitrate = int(get_arg(5))
 
 if get_arg(6) == '':
     record_every_nth = 10
